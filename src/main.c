@@ -55,6 +55,7 @@
 #include "dbus-common.h"
 #include "agent.h"
 #include "profile.h"
+#include "gatt.h"
 #include "systemd.h"
 
 #define BLUEZ_NAME "org.bluez"
@@ -545,6 +546,8 @@ int main(int argc, char *argv[])
 
 	g_dbus_set_flags(gdbus_flags);
 
+	gatt_init();
+
 	if (option_compat == TRUE)
 		sdp_flags |= SDP_SERVER_COMPAT;
 
@@ -595,6 +598,7 @@ int main(int argc, char *argv[])
 	btd_profile_cleanup();
 	btd_agent_cleanup();
 	btd_device_cleanup();
+	gatt_cleanup();
 
 	adapter_cleanup();
 
