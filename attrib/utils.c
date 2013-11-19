@@ -25,7 +25,12 @@
 #include "config.h"
 #endif
 
+#include <errno.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+
 #include <glib.h>
 
 #include <bluetooth/bluetooth.h>
@@ -99,6 +104,55 @@ GIOChannel *gatt_connect(const char *src, const char *dst,
 	}
 
 	return chan;
+}
+
+static gboolean unix_connect_cb(GIOChannel *io, GIOCondition cond,
+							gpointer user_data)
+{
+	BtIOConnect connect_cb = user_data;
+	GError *gerr;
+
+	if (cond & (G_IO_HUP | G_IO_ERR | G_IO_NVAL)) {
+		gerr = g_error_new_literal(G_IO_CHANNEL_ERROR,
+						G_IO_CHANNEL_ERROR_FAILED,
+						"connection attempt failed");
+		connect_cb(io, gerr, user_data);
+		g_clear_error(&gerr);
+	} else {
+		connect_cb(io, NULL, user_data);
+	}
+
+	return FALSE;
+}
+
+GIOChannel *unix_connect(BtIOConnect connect_cb, GError **gerr)
+{
+	GIOChannel *io;
+	struct sockaddr_un uaddr  = {
+		.sun_family	= AF_UNIX,
+		.sun_path	= "\0/bluetooth/unix_att",
+	};
+	int sk;
+
+	sk = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC , 0);
+	if (sk < 0) {
+		g_set_error_literal(gerr, G_IO_CHANNEL_ERROR,
+				G_IO_CHANNEL_ERROR_FAILED, strerror(errno));
+		return NULL;
+	}
+
+	if (connect(sk, (struct sockaddr *) &uaddr, sizeof(uaddr)) < 0) {
+		g_set_error_literal(gerr, G_IO_CHANNEL_ERROR,
+				G_IO_CHANNEL_ERROR_FAILED, strerror(errno));
+		close(sk);
+		return NULL;
+	}
+
+	io = g_io_channel_unix_new(sk);
+	g_io_add_watch(io, G_IO_OUT | G_IO_ERR | G_IO_HUP | G_IO_NVAL,
+						unix_connect_cb, connect_cb);
+
+	return io;
 }
 
 size_t gatt_attr_data_from_string(const char *str, uint8_t **data)

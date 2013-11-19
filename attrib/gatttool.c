@@ -29,7 +29,6 @@
 #include <errno.h>
 #include <glib.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
@@ -53,6 +52,7 @@ static int opt_end = 0xffff;
 static int opt_handle = -1;
 static int opt_mtu = 0;
 static int opt_psm = 0;
+static gboolean opt_local = FALSE;
 static gboolean opt_primary = FALSE;
 static gboolean opt_characteristics = FALSE;
 static gboolean opt_char_read = FALSE;
@@ -511,6 +511,8 @@ static GOptionEntry options[] = {
 		"Specify local adapter interface", "hciX" },
 	{ "device", 'b', 0, G_OPTION_ARG_STRING, &opt_dst,
 		"Specify remote Bluetooth address", "MAC" },
+	{ "local", 'L', 0, G_OPTION_ARG_NONE, &opt_local,
+		"Use unix socket transport (local communication)", NULL },
 	{ "addr-type", 't', 0, G_OPTION_ARG_STRING, &opt_dst_type,
 		"Set LE address type. Default: public", "[public | random]"},
 	{ "mtu", 'm', 0, G_OPTION_ARG_INT, &opt_mtu,
@@ -563,6 +565,11 @@ int main(int argc, char *argv[])
 		g_clear_error(&gerr);
 	}
 
+	if (opt_local) {
+		opt_src = NULL;
+		opt_dst = NULL;
+	}
+
 	if (opt_interactive) {
 		interactive(opt_src, opt_dst, opt_dst_type, opt_psm);
 		goto done;
@@ -588,14 +595,20 @@ int main(int argc, char *argv[])
 		goto done;
 	}
 
-	if (opt_dst == NULL) {
-		g_print("Remote Bluetooth address required\n");
-		got_error = TRUE;
-		goto done;
+	if (opt_local)
+		chan = unix_connect(connect_cb, &gerr);
+	else {
+		if (opt_dst == NULL) {
+			g_print("Remote Bluetooth address required\n");
+			got_error = TRUE;
+			goto done;
+		}
+
+		chan = gatt_connect(opt_src, opt_dst, opt_dst_type,
+					opt_sec_level, opt_psm, opt_mtu,
+					connect_cb, &gerr);
 	}
 
-	chan = gatt_connect(opt_src, opt_dst, opt_dst_type, opt_sec_level,
-					opt_psm, opt_mtu, connect_cb, &gerr);
 	if (chan == NULL) {
 		g_printerr("%s\n", gerr->message);
 		g_clear_error(&gerr);
