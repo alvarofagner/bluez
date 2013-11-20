@@ -468,18 +468,18 @@ GAttrib *g_attrib_new(GIOChannel *io)
 	struct _GAttrib *attrib;
 	uint16_t imtu;
 	uint16_t att_mtu;
-	uint16_t cid;
-	GError *gerr = NULL;
+	uint16_t cid = 0;
 
 	g_io_channel_set_encoding(io, NULL, NULL);
 	g_io_channel_set_buffered(io, FALSE);
 
-	bt_io_get(io, &gerr, BT_IO_OPT_IMTU, &imtu,
-				BT_IO_OPT_CID, &cid, BT_IO_OPT_INVALID);
-	if (gerr) {
-		error("%s", gerr->message);
-		g_error_free(gerr);
-		return NULL;
+	if (bt_io_get(io, NULL, BT_IO_OPT_IMTU, &imtu, BT_IO_OPT_CID, &cid,
+						BT_IO_OPT_INVALID) == FALSE) {
+		/*
+		 * Use default ATT LE MTU for non-standard transports. Used
+		 * for testing purpose only. eg: Unix sockets
+		 */
+		imtu = ATT_DEFAULT_LE_MTU;
 	}
 
 	attrib = g_try_new0(struct _GAttrib, 1);
