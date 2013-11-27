@@ -84,7 +84,7 @@ static char *get_prompt(void)
 	if (opt_dst)
 		g_string_append_printf(prompt, "[%17s]", opt_dst);
 	else
-		g_string_append_printf(prompt, "[%17s]", "");
+		g_string_append_printf(prompt, "[LOCAL]");
 
 	if (conn_state == STATE_CONNECTED)
 		g_string_append(prompt, COLOR_OFF);
@@ -405,15 +405,18 @@ static void cmd_connect(int argcp, char **argvp)
 			opt_dst_type = g_strdup("public");
 	}
 
-	if (opt_dst == NULL) {
-		error("Remote Bluetooth address required\n");
-		return;
+	if (opt_dst) {
+
+		rl_printf("Attempting to connect to %s\n", opt_dst);
+		set_state(STATE_CONNECTING);
+		iochannel = gatt_connect(opt_src, opt_dst, opt_dst_type,
+					opt_sec_level, opt_psm, opt_mtu,
+					connect_cb, &gerr);
+	} else {
+		rl_printf("Local connection\n");
+		iochannel = unix_connect(connect_cb, &gerr);
 	}
 
-	rl_printf("Attempting to connect to %s\n", opt_dst);
-	set_state(STATE_CONNECTING);
-	iochannel = gatt_connect(opt_src, opt_dst, opt_dst_type, opt_sec_level,
-					opt_psm, opt_mtu, connect_cb, &gerr);
 	if (iochannel == NULL) {
 		set_state(STATE_DISCONNECTED);
 		error("%s\n", gerr->message);
