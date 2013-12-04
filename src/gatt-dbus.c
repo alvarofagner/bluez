@@ -44,6 +44,7 @@
 
 #define GATT_MGR_IFACE			"org.bluez.GattManager1"
 #define SERVICE_IFACE			"org.bluez.GattService1"
+#define CHARACTERISTIC_IFACE		"org.bluez.GattCharacteristic1"
 
 #define REGISTER_TIMER         1
 
@@ -77,6 +78,16 @@ static int service_path_cmp(gconstpointer a, gconstpointer b)
 	return g_strcmp0(service->path, path);
 }
 
+static int proxy_path_cmp(gconstpointer a, gconstpointer b)
+{
+	GDBusProxy *proxy1 = (GDBusProxy *) a;
+	GDBusProxy *proxy2 = (GDBusProxy *) b;
+	const char *path1 = g_dbus_proxy_get_path(proxy1);
+	const char *path2 = g_dbus_proxy_get_path(proxy2);
+
+	return g_strcmp0(path1, path2);
+}
+
 static void proxy_added(GDBusProxy *proxy, void *user_data)
 {
 	struct external_app *eapp = user_data;
@@ -87,10 +98,17 @@ static void proxy_added(GDBusProxy *proxy, void *user_data)
 
 	DBG("path %s iface %s", path, interface);
 
-	if (g_strcmp0(interface, SERVICE_IFACE) != 0)
+	if (g_strcmp0(interface, CHARACTERISTIC_IFACE) != 0 &&
+		g_strcmp0(interface, SERVICE_IFACE) != 0)
 		return;
 
-	eapp->proxies = g_slist_append(eapp->proxies, proxy);
+	/*
+	 * Object path follows a hierarchical organization. Add the
+	 * proxies sorted by path helps the logic to register the
+	 * object path later.
+	 */
+	eapp->proxies = g_slist_insert_sorted(eapp->proxies, proxy,
+							proxy_path_cmp);
 }
 
 static bool remove_service(struct external_app *eapp, const char *path)
@@ -185,6 +203,35 @@ static struct external_app *new_external_app(DBusConnection *conn,
 	return eapp;
 }
 
+static int register_external_characteristic(GDBusProxy *proxy)
+{
+	DBusMessageIter iter;
+	const char *uuid;
+	bt_uuid_t btuuid;
+	struct btd_attribute *attr;
+
+	if (!g_dbus_proxy_get_property(proxy, "UUID", &iter))
+		return -EINVAL;
+
+	if (dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_STRING)
+		return -EINVAL;
+
+	dbus_message_iter_get_basic(&iter, &uuid);
+
+	if (bt_string_to_uuid(&btuuid, uuid) < 0)
+		return -EINVAL;
+
+	/*
+	 * TODO: Add properties according to Core SPEC page 1898.
+	 * Reference table 3.5: Characteristic Properties bit field.
+	 *
+	 * The characteristic added bellow is restricted to Write
+	 * Without Response property only.
+	 */
+	attr = btd_gatt_add_char(&btuuid, 0x04);
+	return attr ? 0 : -EINVAL;
+}
+
 static struct btd_attribute *register_external_service(GDBusProxy *proxy)
 {
 	DBusMessageIter iter;
@@ -246,6 +293,15 @@ static gboolean finish_register(gpointer user_data)
 					register_external_service(proxy);
 
 			DBG("External service: %s", path);
+		} else if (service &&
+			g_strcmp0(CHARACTERISTIC_IFACE, interface) == 0 &&
+			g_str_has_prefix(service->path, path) == FALSE) {
+
+			if (register_external_characteristic(proxy) < 0)
+				DBG("Inconsistent external characteristic: %s",
+									path);
+			else
+				DBG("External characteristic: %s", path);
 		}
 	}
 
