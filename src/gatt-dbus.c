@@ -39,6 +39,7 @@
 #include "log.h"
 
 #include "error.h"
+#include "attrib/gattrib.h"
 #include "gatt.h"
 #include "gatt-dbus.h"
 
