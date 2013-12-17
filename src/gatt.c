@@ -82,6 +82,27 @@ static bool is_service(struct btd_attribute *attr)
 	return false;
 }
 
+static uint8_t errno_to_att(int err)
+{
+	switch (err) {
+	case EACCES:
+		return ATT_ECODE_AUTHORIZATION;
+	case EINVAL:
+		return ATT_ECODE_INVAL_ATTR_VALUE_LEN;
+	case ENOENT:
+		return ATT_ECODE_ATTR_NOT_FOUND;
+	default:
+		return ATT_ECODE_UNLIKELY;
+	}
+}
+
+static gint find_by_handle(gconstpointer a, gconstpointer b)
+{
+	const struct btd_attribute *attr = a;
+
+	return attr->handle - GPOINTER_TO_UINT(b);
+}
+
 void btd_gatt_read_attribute(GAttrib *attrib, struct btd_attribute *attr,
 					btd_attr_read_result_t result,
 					void *user_data)
@@ -515,6 +536,70 @@ static void read_by_type(GAttrib *attrib, const uint8_t *ipdu, size_t ilen)
 	read_by_type_result(attrib, attr->value, attr->value_len, proc);
 }
 
+static void read_request_result(int err, uint8_t *value, size_t len,
+							void *user_data)
+{
+	GAttrib *attrib = user_data;
+	uint8_t opdu[ATT_DEFAULT_LE_MTU];
+	size_t olen;
+
+	if (err) {
+		/* TODO: Set the correct handle */
+		send_error(attrib, ATT_OP_READ_REQ, 0x0000, errno_to_att(err));
+		return;
+	}
+
+	olen = enc_read_resp(value, len, opdu, sizeof(opdu));
+
+	g_attrib_send(attrib, 0, opdu, olen, NULL, NULL, NULL);
+}
+
+static void read_request(GAttrib *attrib, const uint8_t *ipdu, size_t ilen)
+{
+	uint16_t handle;
+	GList *list;
+	struct btd_attribute *attr;
+
+	if (dec_read_req(ipdu, ilen, &handle) == 0) {
+		send_error(attrib, ipdu[0], 0x0000, ATT_ECODE_INVALID_PDU);
+		return;
+	}
+
+	list = g_list_find_custom(local_attribute_db,
+				GUINT_TO_POINTER(handle), find_by_handle);
+	if (!list) {
+		send_error(attrib, ipdu[0], 0x0000, ATT_ECODE_INVALID_HANDLE);
+		return;
+	}
+
+	attr = list->data;
+
+	/* TODO: permission/property checking missing */
+
+	/* Constant value */
+	if (attr->value_len > 0) {
+		uint8_t opdu[ATT_DEFAULT_LE_MTU];
+		size_t olen = enc_read_resp(attr->value, attr->value_len, opdu,
+								sizeof(opdu));
+
+		g_attrib_send(attrib, 0, opdu, olen, NULL, NULL, NULL);
+		return;
+	}
+
+	/* Dynamic value provided by external entity */
+	if (attr->read_cb == NULL) {
+		send_error(attrib, ATT_OP_READ_REQ, handle,
+						ATT_ECODE_READ_NOT_PERM);
+		return;
+	}
+
+	/*
+	 * For external characteristics (GATT server), the read callback
+	 * is mapped to a simple proxy function call.
+	 */
+	attr->read_cb(attrib, attr, read_request_result, attrib);
+}
+
 static void channel_handler_cb(const uint8_t *ipdu, uint16_t ilen,
 							gpointer user_data)
 {
@@ -527,7 +612,6 @@ static void channel_handler_cb(const uint8_t *ipdu, uint16_t ilen,
 	/* Requests */
 	case ATT_OP_WRITE_CMD:
 	case ATT_OP_WRITE_REQ:
-	case ATT_OP_READ_REQ:
 	case ATT_OP_MTU_REQ:
 	case ATT_OP_FIND_INFO_REQ:
 	case ATT_OP_FIND_BY_TYPE_REQ:
@@ -544,6 +628,9 @@ static void channel_handler_cb(const uint8_t *ipdu, uint16_t ilen,
 		break;
 	case ATT_OP_READ_BY_TYPE_REQ:
 		read_by_type(attrib, ipdu, ilen);
+		break;
+	case ATT_OP_READ_REQ:
+		read_request(attrib, ipdu, ilen);
 		break;
 
 	/* Responses */
