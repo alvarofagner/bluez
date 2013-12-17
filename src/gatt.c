@@ -60,6 +60,8 @@ struct btd_attribute {
 };
 
 struct procedure_data {
+	uint16_t handle;		/* Operation handle */
+	GAttrib *attrib;		/* Connection reference */
 	GList *match;			/* List of matching attributes */
 	size_t vlen;			/* Pattern: length of each value */
 	size_t olen;				/* Output PDU length */
@@ -539,23 +541,26 @@ static void read_by_type(GAttrib *attrib, const uint8_t *ipdu, size_t ilen)
 static void read_request_result(int err, uint8_t *value, size_t len,
 							void *user_data)
 {
-	GAttrib *attrib = user_data;
-	uint8_t opdu[ATT_DEFAULT_LE_MTU];
+	struct procedure_data *proc = user_data;
 	size_t olen;
 
 	if (err) {
-		/* TODO: Set the correct handle */
-		send_error(attrib, ATT_OP_READ_REQ, 0x0000, errno_to_att(err));
+		send_error(proc->attrib, ATT_OP_READ_REQ, proc->handle,
+							errno_to_att(err));
 		return;
 	}
 
-	olen = enc_read_resp(value, len, opdu, sizeof(opdu));
+	olen = enc_read_resp(value, len, proc->opdu, sizeof(proc->opdu));
 
-	g_attrib_send(attrib, 0, opdu, olen, NULL, NULL, NULL);
+	g_attrib_send(proc->attrib, 0, proc->opdu, olen, NULL, NULL, NULL);
+
+	g_attrib_unref(proc->attrib);
+	g_free(proc);
 }
 
 static void read_request(GAttrib *attrib, const uint8_t *ipdu, size_t ilen)
 {
+	struct procedure_data *proc;
 	uint16_t handle;
 	GList *list;
 	struct btd_attribute *attr;
@@ -597,7 +602,11 @@ static void read_request(GAttrib *attrib, const uint8_t *ipdu, size_t ilen)
 	 * For external characteristics (GATT server), the read callback
 	 * is mapped to a simple proxy function call.
 	 */
-	attr->read_cb(attrib, attr, read_request_result, attrib);
+	proc = g_malloc0(sizeof(*proc));
+	proc->attrib = g_attrib_ref(attrib);
+	proc->handle = handle;
+
+	attr->read_cb(attrib, attr, read_request_result, proc);
 }
 
 static void channel_handler_cb(const uint8_t *ipdu, uint16_t ilen,
