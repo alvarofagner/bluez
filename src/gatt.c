@@ -638,7 +638,68 @@ static void write_cmd(GAttrib *attrib, const uint8_t *ipdu, size_t ilen)
 		return;
 	}
 
-	attr->write_cb(attr, value, vlen);
+	attr->write_cb(attr, value, vlen, NULL, NULL);
+}
+
+static void write_request_result(int err, void *user_data)
+{
+	struct procedure_data *proc = user_data;
+	uint16_t olen;
+
+	DBG("Write Request (0x%04X) status: %d", proc->handle, err);
+
+	if (err != 0)
+		olen = enc_error_resp(ATT_OP_WRITE_REQ, proc->handle,
+						errno_to_att(err), proc->opdu,
+						sizeof(proc->opdu));
+	else
+		olen = enc_write_resp(proc->opdu);
+
+	g_attrib_send(proc->attrib, 0, proc->opdu, olen, NULL, NULL, NULL);
+
+	g_attrib_unref(proc->attrib);
+	g_free(proc);
+}
+
+static void write_request(GAttrib *attrib, const uint8_t *ipdu, size_t ilen)
+{
+	struct procedure_data *proc;
+	struct btd_attribute *attr;
+	GList *list;
+	size_t vlen;
+	uint16_t handle;
+	uint8_t value[ATT_DEFAULT_LE_MTU];
+
+	if (dec_write_req(ipdu, ilen, &handle, value, &vlen) == 0) {
+		send_error(attrib, ipdu[0], handle, ATT_ECODE_INVALID_PDU);
+		return;
+	}
+
+	list = g_list_find_custom(local_attribute_db, GUINT_TO_POINTER(handle),
+								find_by_handle);
+	if (!list) {
+		send_error(attrib, ipdu[0], handle, ATT_ECODE_INVALID_HANDLE);
+		return;
+	}
+
+	attr = list->data;
+
+	if (attr->write_cb == NULL) {
+		send_error(attrib, ipdu[0], handle, ATT_ECODE_WRITE_NOT_PERM);
+		return;
+	}
+
+	/*
+	 * For external characteristics (GATT server), the write callback
+	 * is mapped to a DBusProxy simple proxy Set property method call.
+	 */
+
+	proc = g_malloc0(sizeof(*proc));
+	proc->attrib = g_attrib_ref(attrib);
+	proc->handle = handle;
+
+	DBG("Write Request (0x%04X)", proc->handle);
+	attr->write_cb(attr, value, vlen, write_request_result, proc);
 }
 
 static void channel_handler_cb(const uint8_t *ipdu, uint16_t ilen,
@@ -651,7 +712,6 @@ static void channel_handler_cb(const uint8_t *ipdu, uint16_t ilen,
 		break;
 
 	/* Requests */
-	case ATT_OP_WRITE_REQ:
 	case ATT_OP_MTU_REQ:
 	case ATT_OP_FIND_INFO_REQ:
 	case ATT_OP_FIND_BY_TYPE_REQ:
@@ -674,6 +734,9 @@ static void channel_handler_cb(const uint8_t *ipdu, uint16_t ilen,
 		break;
 	case ATT_OP_WRITE_CMD:
 		write_cmd(attrib, ipdu, ilen);
+		break;
+	case ATT_OP_WRITE_REQ:
+		write_request(attrib, ipdu, ilen);
 		break;
 
 	/* Responses */
