@@ -612,6 +612,35 @@ static void read_request(GAttrib *attrib, const uint8_t *ipdu, size_t ilen)
 	attr->read_cb(attrib, attr, read_request_result, proc);
 }
 
+static void write_cmd(GAttrib *attrib, const uint8_t *ipdu, size_t ilen)
+{
+	uint16_t handle;
+	GList *list;
+	struct btd_attribute *attr;
+	size_t vlen;
+	uint8_t value[ATT_DEFAULT_LE_MTU];
+
+	if (dec_write_cmd(ipdu, ilen, &handle, value, &vlen) == 0)
+		return;
+
+	list = g_list_find_custom(local_attribute_db,
+				GUINT_TO_POINTER(handle), find_by_handle);
+
+	if (!list) {
+		DBG("Attribute 0x%04x: not found", handle);
+		return;
+	}
+
+	attr = list->data;
+
+	if (attr->write_cb == NULL) {
+		DBG("Attribute 0x%04x: Write not allowed", handle);
+		return;
+	}
+
+	attr->write_cb(attr, value, vlen);
+}
+
 static void channel_handler_cb(const uint8_t *ipdu, uint16_t ilen,
 							gpointer user_data)
 {
@@ -622,7 +651,6 @@ static void channel_handler_cb(const uint8_t *ipdu, uint16_t ilen,
 		break;
 
 	/* Requests */
-	case ATT_OP_WRITE_CMD:
 	case ATT_OP_WRITE_REQ:
 	case ATT_OP_MTU_REQ:
 	case ATT_OP_FIND_INFO_REQ:
@@ -643,6 +671,9 @@ static void channel_handler_cb(const uint8_t *ipdu, uint16_t ilen,
 		break;
 	case ATT_OP_READ_REQ:
 		read_request(attrib, ipdu, ilen);
+		break;
+	case ATT_OP_WRITE_CMD:
+		write_cmd(attrib, ipdu, ilen);
 		break;
 
 	/* Responses */
