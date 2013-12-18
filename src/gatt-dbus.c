@@ -274,7 +274,7 @@ static int register_external_characteristic(GDBusProxy *proxy)
 	 * The characteristic added bellow is restricted to Write
 	 * Without Response property only.
 	 */
-	attr = btd_gatt_add_char(&btuuid, 0x04, read_external_char_cb);
+	attr = btd_gatt_add_char(&btuuid, 0x04, read_external_char_cb, NULL);
 	if (attr == NULL)
 		return -EINVAL;
 
