@@ -58,6 +58,18 @@ static GList *local_attribute_db;
 static uint16_t next_handle = 0x0001;
 static guint unix_watch;
 
+static bool is_service(struct btd_attribute *attr)
+{
+	if (attr->type.type != BT_UUID16)
+		return false;
+
+	if (attr->type.value.u16 == GATT_PRIM_SVC_UUID ||
+			attr->type.value.u16 == GATT_SND_SVC_UUID)
+		return true;
+
+	return false;
+}
+
 static int local_database_add(uint16_t handle, struct btd_attribute *attr)
 {
 	attr->handle = handle;
@@ -99,6 +111,33 @@ struct btd_attribute *btd_gatt_add_service(const bt_uuid_t *uuid)
 	next_handle = next_handle + 1;
 
 	return attr;
+}
+
+void btd_gatt_remove_service(struct btd_attribute *service)
+{
+	GList *list = g_list_find(local_attribute_db, service);
+	bool first_node = local_attribute_db == list;
+
+	if (list == NULL)
+		return;
+
+	/* Remove service declaration attribute */
+	g_free(list->data);
+	list = g_list_delete_link(list, list);
+
+	/* Remove all characteristics until next service declaration */
+	while (list && !is_service(list->data)) {
+		g_free(list->data);
+		list = g_list_delete_link(list, list);
+	}
+
+	/*
+	 * When removing the first node, local attribute database head
+	 * needs to be updated. Node removed from middle doesn't change
+	 * the list head address.
+	 */
+	if (first_node)
+		local_attribute_db = list;
 }
 
 static void send_error(GAttrib *attrib, uint8_t opcode, uint16_t handle,
