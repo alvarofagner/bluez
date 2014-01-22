@@ -55,7 +55,6 @@
 #include "dbus-common.h"
 #include "agent.h"
 #include "profile.h"
-#include "gatt.h"
 #include "systemd.h"
 
 #define BLUEZ_NAME "org.bluez"

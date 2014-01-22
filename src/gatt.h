@@ -23,10 +23,6 @@
 
 struct btd_attribute;
 
-void gatt_init(void);
-
-void gatt_cleanup(void);
-
 /* btd_gatt_add_service - Add a service declaration to local attribute database.
  * @uuid:	Service UUID.
  *

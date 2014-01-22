@@ -41,6 +41,7 @@
 #include "attrib/gattrib.h"
 
 #include "gatt-dbus.h"
+#include "hcid.h"
 #include "gatt.h"
 
 /* Common GATT UUIDs */
