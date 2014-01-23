@@ -420,7 +420,25 @@ static void write_external_desc_cb(struct btd_attribute *attr, const uint8_t *va
 				size_t len, btd_attr_write_result_t result,
 				void *user_data)
 {
-	// TODO Needs to be implemented.
+	GDBusProxy *proxy;
+	struct external_write_data *wdata;
+
+	proxy = g_hash_table_lookup(proxy_hash, attr);
+	if (proxy == NULL) {
+		result(EPERM, user_data);
+		return;
+	}
+
+	wdata = g_new0(struct external_write_data, 1);
+	wdata->result_cb = result;
+	wdata->user_data = user_data;
+
+	g_dbus_proxy_set_property_array(proxy, "Value", DBUS_TYPE_BYTE,
+						value, len, write_char_reply,
+						wdata, g_free);
+
+	DBG("Server: Write descriptor callback %s",
+					g_dbus_proxy_get_path(proxy));
 }
 
 static int register_external_descriptor(GDBusProxy *proxy)
